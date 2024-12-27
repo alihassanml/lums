@@ -2,10 +2,6 @@ import cv2
 import numpy as np
 import time
 import csv
-import matplotlib.pyplot as plt
-import matplotlib.image as imd
-import warnings
-warnings.filterwarnings('ignore')
 
 def display_video_in_hsv(video_path):
     # Open the video file or webcam
@@ -44,6 +40,7 @@ def display_video_in_hsv(video_path):
             if not ret:
                 print("Error: Cannot read frame during wait.")
                 break
+            # frame = cv2.flip(frame, 1)
             cv2.imshow('Press S to Start', frame)
 
             if cv2.waitKey(1) & 0xFF == ord('s'):
@@ -87,38 +84,37 @@ def display_video_in_hsv(video_path):
 
             valid_contour_found = False
             if contours:
+                # Get the largest contour
                 largest_contour = max(contours, key=cv2.contourArea)
                 if cv2.contourArea(largest_contour) > 500:  # Ignore small areas (e.g., noise)
                     valid_contour_found = True
-                    x_min, y_min, width, height = cv2.boundingRect(largest_contour)
-                    cv2.rectangle(frame, (x_min, y_min), (x_min + width, y_min + height), (0, 255, 0), 2)
-
-                    center_x = x_min + width // 2
-                    center_y = y_min + height // 2
-
-                    # Draw a dot at the center of the bounding box
-                    cv2.circle(frame, (center_x, center_y), 5, (0, 255, 0), -1) 
                     # Get the center of the green object
                     moments = cv2.moments(largest_contour)
                     if moments['m00'] != 0:
                         x = int(moments['m10'] / moments['m00'])
                         y = int(moments['m01'] / moments['m00'])
 
-                        # Adjust x to account for the flipped frame
-                        x = frame_width - x  # Flip the x-coordinate horizontally
+                        # Add the detected position to the list
+                        detected_positions.append((x, y))
+                        if len(detected_positions) > 5:  # Keep only the last 5 positions
+                            detected_positions.pop(0)
+
+                        # Calculate the average position for stability
+                        avg_x = int(np.mean([pos[0] for pos in detected_positions]))
+                        avg_y = int(np.mean([pos[1] for pos in detected_positions]))
 
                         # Only draw if position change is significant
                         if is_drawing and prev_x is not None and prev_y is not None:
-                            # Draw line between previous and current position
-                            cv2.line(path_image, (prev_x, prev_y), (x, y), (0, 255, 0), 2)
+                            if abs(avg_x - prev_x) > 5 or abs(avg_y - prev_y) > 5:
+                                cv2.line(path_image, (prev_x, prev_y), (avg_x, avg_y), (0, 255, 0), 2)
 
                         # Save the coordinates to the CSV file (if within frame limit)
                         if is_drawing and frame_counter < max_frames:
-                            csv_writer.writerow([frame_counter, x, y])
+                            csv_writer.writerow([frame_counter, avg_x, avg_y])
                             frame_counter += 1
 
                         # Update the previous position
-                        prev_x, prev_y = x, y
+                        prev_x, prev_y = avg_x, avg_y
 
             if not valid_contour_found:
                 # Reset previous positions if no valid green object is detected
@@ -130,6 +126,9 @@ def display_video_in_hsv(video_path):
 
             # Display the original frame
             cv2.imshow('Original Frame', frame)
+
+            # Display the processed mask
+            cv2.imshow("Green Processed", green_close)
 
             # Display the path image
             cv2.imshow("Path Image", path_image)
@@ -149,60 +148,9 @@ def display_video_in_hsv(video_path):
                 file.truncate()  # Clear the CSV file
                 csv_writer.writerow(["Frame", "X", "Y"])  # Rewrite the header
 
-    # Release the video capture object and close all OpenCV windows after the loop finishes
+    # Release the video capture object and close all OpenCV windows
     cap.release()
     cv2.destroyAllWindows()
-def display_drawing_with_opencv(csv_file):
-    import cv2
-    import csv
-    import numpy as np
 
-    # Canvas dimensions (adjust as needed)
-    canvas_width = 640
-    canvas_height = 480
-
-    # Create a blank image to draw the path
-    canvas = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
-
-    x_coords, y_coords = [], []
-
-    # Read the coordinates from the CSV file
-    try:
-        with open(csv_file, mode='r') as file:
-            csv_reader = csv.DictReader(file)
-            for row in csv_reader:
-                x_coords.append(int(row['X']))
-                y_coords.append(int(row['Y']))
-    except FileNotFoundError:
-        print(f"Error: File '{csv_file}' not found.")
-        return
-    except ValueError:
-        print("Error: Invalid data in the CSV file.")
-        return
-
-    # Check if there are coordinates to plot
-    if not x_coords or not y_coords:
-        print("No data found in the CSV file to display.")
-        return
-
-    # Draw the path with arrows on the canvas
-    for i in range(1, len(x_coords)):
-        start_point = (x_coords[i - 1], y_coords[i - 1])
-        end_point = (x_coords[i], y_coords[i])
-        cv2.arrowedLine(canvas, start_point, end_point, (0, 255, 0), 2, tipLength=0.3)  # Green arrow
-
-    # Highlight the start and end points
-    cv2.circle(canvas, (x_coords[0], y_coords[0]), 5, (255, 0, 0), -1)  # Blue start point
-    cv2.circle(canvas, (x_coords[-1], y_coords[-1]), 5, (0, 0, 255), -1)  # Red end point
-
-    # Display the canvas using OpenCV
-    cv2.imshow("Drawing with Directions", canvas)
-
-    print("Press any key to close the window...")
-    cv2.waitKey(0)  # Wait for a key press
-    cv2.destroyAllWindows()
-
-# Display video and then draw with directions
+# Call the function with a video source (0 for webcam)
 display_video_in_hsv(0)
-display_drawing_with_opencv('coordinates.csv')
-
